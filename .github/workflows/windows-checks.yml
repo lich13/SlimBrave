@@ -1,0 +1,39 @@
+name: Windows script checks
+
+on:
+  push:
+    branches: [main]
+    paths: ['SlimBrave.ps1', 'Presets/**', '.github/workflows/windows-checks.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse script and presets
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          $parseTokens = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ./SlimBrave.ps1).Path, [ref]$parseTokens, [ref]$parseErrors)
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Get-ChildItem ./Presets -Filter *.json | ForEach-Object {
+            $null = Get-Content -Raw $_.FullName | ConvertFrom-Json
+          }
+          Add-Type -AssemblyName System.Windows.Forms
+      - name: Static analysis
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          $issues = @(Invoke-ScriptAnalyzer -Path ./SlimBrave.ps1 -Severity Error)
+          $issues | Format-Table RuleName, Line, Message -AutoSize
+          if ($issues.Count -gt 0) { exit 1 }
